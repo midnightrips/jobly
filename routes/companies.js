@@ -6,7 +6,7 @@ const jsonschema = require("jsonschema");
 const express = require("express");
 
 const { BadRequestError } = require("../expressError");
-const { ensureLoggedIn } = require("../middleware/auth");
+const { ensureLoggedIn, ensureAdminOrCorrectUser } = require("../middleware/auth");
 const Company = require("../models/company");
 
 const companyNewSchema = require("../schemas/companyNew.json");
@@ -21,10 +21,10 @@ const router = new express.Router();
  *
  * Returns { handle, name, description, numEmployees, logoUrl }
  *
- * Authorization required: login
+ * Authorization required: login, is_admin
  */
 
-router.post("/", ensureLoggedIn, async function (req, res, next) {
+router.post("/", [ensureLoggedIn, ensureAdminOrCorrectUser], async function (req, res, next) {
   try {
     const validator = jsonschema.validate(req.body, companyNewSchema);
     if (!validator.valid) {
@@ -52,7 +52,37 @@ router.post("/", ensureLoggedIn, async function (req, res, next) {
 
 router.get("/", async function (req, res, next) {
   try {
-    const companies = await Company.findAll();
+    const allowedFilters = ["nameLike", "minEmployees", "maxEmployees"];
+    const filters = req.query;
+
+    // Ensure filters are a plain object
+    if (typeof filters !== "object" || Array.isArray(filters)) {
+      throw new BadRequestError("Invalid query parameters format");
+    }
+
+    // Validate filters for allowed keys
+    const invalidFilters = Object.keys(filters).filter(
+      (key) => !allowedFilters.includes(key)
+    );
+    if (invalidFilters.length > 0) {
+      throw new BadRequestError(
+        `Invalid filters: ${invalidFilters.join(", ")}. Allowed filters are: ${allowedFilters.join(", ")}`
+      );
+    }
+
+    // Validate minEmployees and maxEmployees logic
+    const { minEmployees, maxEmployees } = filters;
+    if (minEmployees !== undefined && maxEmployees !== undefined && +minEmployees > +maxEmployees) {
+      throw new BadRequestError("minEmployees cannot be greater than maxEmployees");
+    }
+
+    // Call the model method with validated and sanitized inputs
+    const companies = await Company.findAll({
+      name: filters.nameLike,
+      minEmployees: minEmployees !== undefined ? +minEmployees : undefined,
+      maxEmployees: maxEmployees !== undefined ? +maxEmployees : undefined,
+    });
+
     return res.json({ companies });
   } catch (err) {
     return next(err);
@@ -84,10 +114,10 @@ router.get("/:handle", async function (req, res, next) {
  *
  * Returns { handle, name, description, numEmployees, logo_url }
  *
- * Authorization required: login
+ * Authorization required: login, is_admin
  */
 
-router.patch("/:handle", ensureLoggedIn, async function (req, res, next) {
+router.patch("/:handle", [ensureLoggedIn, ensureAdminOrCorrectUser], async function (req, res, next) {
   try {
     const validator = jsonschema.validate(req.body, companyUpdateSchema);
     if (!validator.valid) {
@@ -104,10 +134,10 @@ router.patch("/:handle", ensureLoggedIn, async function (req, res, next) {
 
 /** DELETE /[handle]  =>  { deleted: handle }
  *
- * Authorization: login
+ * Authorization: login, is_admin
  */
 
-router.delete("/:handle", ensureLoggedIn, async function (req, res, next) {
+router.delete("/:handle", [ensureLoggedIn, ensureAdminOrCorrectUser], async function (req, res, next) {
   try {
     await Company.remove(req.params.handle);
     return res.json({ deleted: req.params.handle });

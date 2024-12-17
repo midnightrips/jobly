@@ -42,8 +42,27 @@ function ensureLoggedIn(req, res, next) {
   }
 }
 
+/** Middleware to use when user must be logged in with an account that has is_admin flag
+ *  or when the logged in user must have a matching username
+ */
+
+function ensureAdminOrCorrectUser(req, res, next) {
+  try {
+    const user = res.locals.user;
+
+    if (!(user && (user.isAdmin || user.username === req.params.username))) {
+      throw new UnauthorizedError("Access denied.");
+    }
+
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+}
+
 
 module.exports = {
   authenticateJWT,
   ensureLoggedIn,
+  ensureAdminOrCorrectUser
 };
